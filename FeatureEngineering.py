@@ -10,6 +10,9 @@ versionadded:: 30-09-2023
 import pandas as pd, numpy as np, os
 from itertools import permutations, product
 
+__all__ = ["TimebasedFunction", 
+           "TimebaseFeatures"]
+
 class ValidateParams:
     
     '''Validate parameters'''
@@ -166,7 +169,8 @@ def TimebasedFunction(n=(1,1), agg="mean", operand="divide", n_chars=10):
     Parameters
     ----------
     n : (int, int), default=(1,1)
-        Numbers of periods (`n1`,`n2`). 
+        Numbers of periods (`n1`,`n2`), where n1, n2 are number of 
+        the most recent, and the subsequent periods respectively.
 
     agg : str or function, default="mean"
         Function to use for aggregating the data. If a function, it 
@@ -238,30 +242,35 @@ class TimebaseFeatures(ValidateParams):
     
     Parameters
     ----------
-    start : int, default=1
-        Number of the most recent period.
-    
-    stop : int, default=1
-        Number of the latter period.
-    
+    periods : (int, int) or 1D-array of int, default=(1, 2)
+        If tuple, it must contain only 2 integers e.g. (1,3). This
+        will be passed to numpy.arange to create iterable list of 
+        items to be permutated e.g. [(1, 2), (2, 1)]. The first and
+        second items indicate number of the most recent, and the 
+        subsequent periods respectively. If 1D-array, its members must 
+        be integer only.
+
     attr : str, default="less_equal"
-        Sum of permuted pair must satisfies `attr` and `n_period` 
+        Sum of permuted pair must satisfies `attr` and `n_periods` 
         condition e.g. start + stop <= 2. The accepted string function 
         names follows numpy operation functions.
     
-    n_period : int, default=2
+    n_periods : int, default=2
         A threshold of sum of permuted pair.
     
-    agg : str or function, default="mean"
+    agg : str or function or list, default="mean"
         Function to use for aggregating the data. If a function, it 
         must compute the aggregation of the flattened array only. The 
         accepted string function names follows numpy operation 
-        functions.
+        functions. If list, it must contain functions and/or function 
+        names, e.g. [np.sum, 'mean'].
  
-    operand: str or function, default="divide"
+    operand: str or function or list, default="divide"
         If str, it follows numpy operation functions i.e. "subtract", 
         "add", "divide", and "multiply". If a function, it must 
-        accept 2 parameters i.e. `x1` and `x2` as inputs.
+        accept 2 parameters i.e. `x1` and `x2` as inputs. If list, it 
+        must contain functions and/or function names, e.g. [np.divide, 
+        'add'].
         
     n_chars : int, default=10
         Number of characters to be kept as part of variable name i.e. 
@@ -269,21 +278,37 @@ class TimebaseFeatures(ValidateParams):
         `agg` and `operand`. 
         
     '''
-    def __init__(self, start=1, stop=1, attr="less_equal", n_periods=2, 
+    def __init__(self, periods=(1,2), attr="less_equal", n_periods=2, 
                  agg="mean", operand="divide", n_chars=10):
         
-        # Validate parameters
+        # Validate `periods`
+        if isinstance(periods, tuple):
+            kwds = dict(left=1, closed="left")
+            start = self.Interval("start", periods[0], **kwds)
+            stop  = self.Interval("stop" , periods[1], **kwds)
+            if start>=stop:
+                raise ValueError(f"`start` must be less than `stop`." 
+                                 f"Got `start` ({start}) >= "
+                                 f"`stop` ({stop}).")
+            else: periods = np.arange(start, stop)
+        elif isinstance(periods, (list, np.ndarray)): 
+            ndim = np.array(periods).ndim
+            if ndim==1: periods = periods
+            else: raise ValueError(f"Array of `periods` must be in 1 "
+                                   f"dimension. Got {ndim} instead.")
+        else: raise ValueError(f"`periods` must be either tuple or 1D-array." 
+                               f" Got {type(periods)} instead.")
+        
+        # Validate other parameters
         kwds = dict(left=1, closed="left")
-        self.start = self.Interval("start", start, **kwds)
-        self.stop = self.Interval("stop", stop, **kwds)
-        self.n_chars = self.Interval("n_chars", n_chars, **kwds)
+        self.n_chars   = self.Interval("n_chars", n_chars, **kwds)
         self.n_periods = self.Interval("n_periods", n_periods, 
                                         **{**kwds,**{"left":2}})
         self.attr = getattr(np, attr)
         
         # Permutate set of periods
-        periods = list(permutations(np.arange(self.start, self.stop+1),2))
-        self.periods = [n for n in periods if self.attr(sum(n), self.n_periods)]
+        self.periods = [n for n in list(permutations(periods,2)) 
+                        if self.attr(sum(n), self.n_periods)]
         
         # Create list of `agg` and `operand`
         self.agg = agg if isinstance(agg, list) else [agg]
